@@ -250,8 +250,3 @@ This project demonstrates:
 - Embedded systems debugging
 - Hardware testing before system integration
 
----
-
-# License
-
-This project is intended for **educational and workshop use**.
