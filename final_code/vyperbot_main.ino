@@ -1,11 +1,11 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 
-/* WIFI CONFIG */
-const char* ssid = "SAC-08(2.4GHz)";
-const char* password = "sac@1964";
+/* ---------- WIFI CONFIG ---------- */
+const char* ssid = "your_wifi";
+const char* password = "your_password";
 
-/* UDP CONFIG */
+/* ---------- UDP CONFIG ---------- */
 WiFiUDP udp;        // joystick UDP
 WiFiUDP scoreUdp;   // score UDP
 
@@ -13,35 +13,26 @@ const unsigned int joystickPort = 1234;
 const char* scoreServerIP = "192.168.1.169";
 const unsigned int scoreServerPort = 9000;
 
-/* ESP ID */
+/* ---------- ESP ID ---------- */
 const char* espID = "ESP_1";
 
-/* MOTOR PINS (NodeMCU 1.0) */
-// TB6612 differential drive motor driver
+/* ---------- MOTOR PINS ---------- */
+#define ENA 14
+#define IN1 2
+#define IN2 0
+#define LASER_PIN 13
+#define ENB 16
+#define IN3 5
+#define IN4 4
 
-#define ENA       D1    // D1  → GPIO5  → Motor A PWM (speed control)
-#define IN1       D6    // D6  → GPIO12 → Motor A direction pin 1
-#define IN2       D7    // D7  → GPIO13 → Motor A direction pin 2
+#define stdby 12
 
-#define ENB       D2    // D2  → GPIO4  → Motor B PWM (speed control)
-#define IN3       D3    // D3  → GPIO0  → Motor B direction pin 1 (BOOT pin, must be HIGH at boot)
-#define IN4       D4    // D4  → GPIO2  → Motor B direction pin 2 (BOOT pin, must be HIGH at boot)
-
-#define stdby     D5    // D5  → GPIO14 → TB6612 STBY (enable pin)
-
-/* LDR */
-#define LDR_PIN   A0    // A0  → ADC0   → LDR analog input (0–1023)
-
-/* MODE + STATUS LED */
-#define MODE_PIN  D0    // D0  → GPIO16 → Mode select (INPUT_PULLUP, GND = LDR test mode)
-#define LED       D8    // D8  → GPIO15 → Status LED (LOW at boot, safe output)
-
-/* LDR SETTINGS */
-#define LDR_THRESHOLD 1000
+/* ---------- LDR ---------- */
+#define LDR_PIN 1
+#define LDR_THRESHOLD 500
 const unsigned long lockoutDuration = 10000; // 10s
-const unsigned long freezeDuration = 5000;   // 5s
 
-/* CONTROL STATE */
+/* ---------- CONTROL STATE ---------- */
 float xVal = 128.0;
 float yVal = 128.0;
 
@@ -50,7 +41,7 @@ const unsigned long packetTimeout = 500; // STOP after 0.5s silence
 
 bool motorsStopped = true;
 
-/* LDR STATE */
+/* ---------- LDR STATE ---------- */
 bool lockoutActive = false;
 bool wasAboveThreshold = false;
 unsigned long lockoutStartTime = 0;
@@ -75,18 +66,13 @@ void setup() {
   pinMode(ENB, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
-
+pinMode(LASER_PIN, OUTPUT );
   pinMode(stdby, OUTPUT);
   digitalWrite(stdby, HIGH);
+
   stopMotors();
 
-  /* LDR Pins (+ extra testing pins)*/
-  pinMode(LDR_PIN, INPUT);
-
-  pinMode(MODE_PIN, INPUT_PULLUP);   
-  pinMode(LED, OUTPUT);
-  digitalWrite(LED, LOW);
-
+  // safer PWM for WiFi
   analogWriteFreq(1000);
 
   /* WiFi */
@@ -120,39 +106,9 @@ void setup() {
 /* =========================================================
                         LOOP
 ========================================================= */
-
 void loop() {
 
-  bool freezeBot = false;
-
-  // Detect freeze window (first 5s of lockout)
-  if (lockoutActive) {
-    if (millis() - lockoutStartTime < freezeDuration) {
-      freezeBot = true;
-    }
-  }
-
-  // MODE PRIORITY 
-  if (digitalRead(MODE_PIN) == LOW) {
-    // LDR TEST MODE 
-    handleLDRTestMode();
-  }
-  else if (freezeBot) {
-    // FREEZE MODE
-    stopMotors();
-    motorsStopped = true;
-
-    digitalWrite(LED, HIGH); // LED ON during freeze
-  }
-  else {
-    // NORMAL MODE
-    digitalWrite(LED, LOW);  // LED OFF
-
-    handleJoystickUDP();
-    handlePacketTimeout();
-  }
-
-  // LDR must always run to manage lockout timing
+  handleJoystickUDP();
   handleLDR();
 
   yield(); // keep WiFi alive
@@ -161,17 +117,7 @@ void loop() {
 /* =========================================================
                 PACKET TIMEOUT SAFETY
 ========================================================= */
-void handlePacketTimeout() {
 
-  if (millis() - lastPacketTime > packetTimeout) {
-
-    if (!motorsStopped) {
-      Serial.println("⚠ No packets -> STOP motors");
-      stopMotors();
-      motorsStopped = true;
-    }
-  }
-}
 
 /* =========================================================
                     UDP JOYSTICK
@@ -189,16 +135,34 @@ void handleJoystickUDP() {
   if (len <= 0) return;
 
   packetBuffer[len] = '\0';
-  lastPacketTime = millis();
-  motorsStopped = false;
+ 
+// Serial.println("--------------------------"); //enable this for debugging raw UDP packets
+//   Serial.print("UDP Received from: ");
+//   Serial.println(udp.remoteIP());
+//   Serial.print("Packet Size: ");
+//   Serial.println(packetSize);
+//   Serial.print("Raw Content: [");
+//   Serial.print(packetBuffer); // This prints the string
+//   Serial.println("]");
+
+  if (strcmp(packetBuffer, "ON") == 0) {
+    digitalWrite(LASER_PIN, HIGH);
+    Serial.println("LASER: ON");
+    return; 
+  } 
+  else if (strcmp(packetBuffer, "OFF") == 0) {
+    digitalWrite(LASER_PIN, LOW);
+    Serial.println("LASER: OFF");
+    return; 
+  }
 
   char* comma = strchr(packetBuffer, ',');
   if (!comma) return;
 
   *comma = '\0';
 
-  xVal = constrain(atof(packetBuffer), 0, 255);
-  yVal = constrain(atof(comma + 1), 0, 255);
+  xVal = constrain(atof(packetBuffer), -150, 150);
+  yVal = constrain(atof(comma + 1), -150, 150);
 
   driveDifferential(xVal, yVal);
 }
@@ -208,11 +172,11 @@ void handleJoystickUDP() {
 ========================================================= */
 void driveDifferential(float x, float y) {
 
-  float turn  = (x - 128.0) / 128.0;
-  float speed = (128.0 - y) / 128.0;
+  float turn  = (x ) / 150.0; // joystick gives readings from 0 to 150 for both x and y, we need to normalize this to 0 to 1
+  float speed = ( y) / 150.0;
 
   // deadzone
-  if (abs(turn) < 0.05) turn = 0;
+  if (abs(turn) < 0.05) turn = 0;  //used to snap reall small values to 0, makes sure bot moves smoothly
   if (abs(speed) < 0.05) speed = 0;
 
   int left  = constrain((speed - turn) * 100, -100, 100);
@@ -267,7 +231,6 @@ void handleLDR() {
     ldrValue += analogRead(LDR_PIN);
 
   ldrValue /= 5;
-  Serial.println(ldrValue);
 
   if (ldrValue >= LDR_THRESHOLD && !wasAboveThreshold) {
     wasAboveThreshold = true;
@@ -275,7 +238,7 @@ void handleLDR() {
     lockoutStartTime = now;
     sendScoreUDP();
   }
-  
+
   if (ldrValue < LDR_THRESHOLD)
     wasAboveThreshold = false;
 }
@@ -292,6 +255,7 @@ void sendScoreUDP() {
   }
 
   char msg[32];
+
   snprintf(msg, sizeof(msg), "SCORE,%s", espID);
 
   scoreUdp.beginPacket(scoreServerIP, scoreServerPort);
@@ -299,36 +263,4 @@ void sendScoreUDP() {
   scoreUdp.endPacket();
 
   Serial.println("✓ SCORE SENT");
-}
-
-/* =========================================================
-                LDR TEST MODE
-========================================================= */
-void handleLDRTestMode() {
-
-  // Ensure bot is fully inactive
-  stopMotors();
-  motorsStopped = true;
-
-  // Block UDP traffic silently
-  udp.flush();
-  scoreUdp.flush();
-
-  // Read LDR (averaged)
-  int ldrValue = 0;
-  for (int i = 0; i < 5; i++)
-    ldrValue += analogRead(LDR_PIN);
-
-  ldrValue /= 5;
-
-  Serial.print("[TEST MODE] LDR = ");
-  Serial.println(ldrValue);
-
-  // LED indication
-  if (ldrValue >= LDR_THRESHOLD)
-    digitalWrite(LED, HIGH);
-  else
-    digitalWrite(LED, LOW);
-
-  delay(50); // debounce
 }
