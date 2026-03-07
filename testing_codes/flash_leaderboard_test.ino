@@ -2,12 +2,13 @@
 #include <WiFiUdp.h>
 
 /* WIFI CREDENTIALS */
-const char* ssid = "YOUR_WIFI_NAME";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "your_wifi_name";
+const char* password = "your_password";
 
 /* LEADERBOARD SERVER */
-const char* leaderboardIP = "192.168.1.100";   // change to your server IP
-const int leaderboardPort = 4321;
+const char* leaderboardIP = "10.25.106.120";   // change to your server IP
+const int leaderboardPort = 9000;
+const char* espID = "ESP_1";
 
 /* PINS */
 #define FLASH_BUTTON D3   // GPIO0 (FLASH button)
@@ -53,7 +54,7 @@ void loop() {
   if (buttonState == LOW && lastButtonState == HIGH) {
 
     Serial.println("FLASH button pressed!");
-    sendScorePacket();
+    sendScoreUDP();
 
     digitalWrite(LED_BUILTIN, LOW);  
     delay(200);
@@ -64,13 +65,21 @@ void loop() {
 }
 
 /* SEND SCORE */
-void sendScorePacket() {
+void sendScoreUDP() {
 
-  String message = "SCORE,ESP_1";
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("✗ WiFi lost — reconnecting");
+    WiFi.reconnect();
+    return;
+  }
+
+  char msg[32];
+
+  snprintf(msg, sizeof(msg), "SCORE,%s", espID);
 
   udp.beginPacket(leaderboardIP, leaderboardPort);
-  udp.print(message);
+  udp.write((uint8_t*)msg, strlen(msg));
   udp.endPacket();
 
-  Serial.println("Score packet sent!");
+  Serial.println("✓ SCORE SENT");
 }
